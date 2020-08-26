@@ -1,10 +1,10 @@
 # Group-14
 
-## Members
+### Members
 Will Parker, Payten Lawrence, Dylan Hughes, Piero Bracamonte, and Rajeev Jogi
 
-## Project Desciption
+### Project Desciption
 
-## Objective
+### Objective
 
-## Features
+### Features
