@@ -13,7 +13,7 @@ The design and development of an email client that adheres to a list of specific
 
 ### Features
 
-User login functionality
-User can compose, edit, and send email to other users
-User can search and forward emails to other users
+User login functionality  
+User can compose, edit, and send email to other users  
+User can search and forward emails to other users  
 User can send attachments with an email
