@@ -1,15 +1,15 @@
 # Group-14
 
 ### Members
-* Will Parker(wcparker829)  
-* Payten Lawrence(Jaeger-17)  
-* Dylan Hughes(Dylanhughes27)  
-* Piero Bracamonte(prbracam)  
-* Rajeev Jogi(Rajeev5557)  
+* Will Parker (wcparker829)  
+* Payten Lawrence (Jaeger-17)  
+* Dylan Hughes (Dylanhughes27)  
+* Piero Bracamonte (prbracam)  
+* Rajeev Jogi (Rajeev5557)  
 
 ### Project Desciption
 
-Creation of a web-based email client
+Creation of Umbrella Mail, a web-based email client
 
 ### Objective
 
