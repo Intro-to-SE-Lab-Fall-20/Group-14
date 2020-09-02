@@ -1,11 +1,7 @@
 # Group-14
 
 ### Members
-Will Parker
-Payten Lawrence (Jaeger-17)
-Dylan Hughes (Dylanhughes27)
-Piero Bracamonte
-Rajeev Jogi
+Will Parker, Payten Lawrence (Jaeger-17), Dylan Hughes (Dylanhughes27), Piero Bracamonte, and Rajeev Jogi
 
 ### Project Desciption
 
