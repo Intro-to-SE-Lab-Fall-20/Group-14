@@ -12,8 +12,8 @@ AWS.config.update({ region: "us-east-1" });
 const s3 = new AWS.S3({
   apiVersion: "2006-03-01",
   credentials: {
-    accessKeyId: "AKIA6LQUUTFMH2Y3LCCD",
-    secretAccessKey: "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",
+    accessKeyId: "PUTKEYHERE",
+    secretAccessKey: "PUTKEYHERE",
   },
 });
 
