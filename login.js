@@ -18,9 +18,9 @@ const s3 = new AWS.S3({
 });
 
 var connection = mysql.createConnection({
-  host: "localhost",
-  user: "root",
-  password: "omicron8",
+  host: "8.42.187.197",
+  user: "newuser",
+  password: "@simplepassword",
   database: "usersdb",
 });
 
