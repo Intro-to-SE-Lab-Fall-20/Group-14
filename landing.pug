@@ -1,0 +1,21 @@
+html
+  head
+    title Main Page
+  body
+    h1 !{username}'s inbox:
+    if inbox && searchbar != false
+      h2 Searchbar:
+        form(action="landing/search" method="POST" name='searchbar')
+          input(type='text' name='search_query' placeholder="search your inbox")
+          button Search
+    else
+    ul(style="list-style-type:none;")
+      each val in emails
+        li
+          if inbox
+            a(href="/landing/"+ val[0]) From:!{val[1]}: !{val[2]}
+          else
+            h2 From: #{val[0]}
+            h2 Subject: !{val[1]}
+            p !{val[2]}
+            
