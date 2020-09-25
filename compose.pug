@@ -1,0 +1,46 @@
+doctype html
+head
+  meta(charset="utf-8")
+  meta(name="viewport" content="width=devide-width, initial-scale=1")
+  script(src='https://cdn.tiny.cloud/1/no-api-key/tinymce/5/tinymce.min.js', referrerpolicy='origin')
+  script.
+    tinymce.init({
+    selector: "#emailbody",
+    });
+title Composing an Email
+body
+  h1 Compose an email below:
+  form(action="send" method="POST" class="email-form")
+    table(style="width:100%; height:auto;")
+      tr
+        th(align="right" style="width:10%") To:
+        td
+          input(style="width:50%" name="send_to" type="email" required="required")
+      tr
+        th(align="right" style="width:10%") Subject:
+        td
+          input(style="width:50%" name="send_subject")
+      tr
+        th(align="right" style="width:10%") Body:
+        td(style="width:80%")
+      tr
+        th(style="width:10%")
+        td
+          if forward != false
+            textarea#emailbody(style="width:50%; height:400px; overflow:auto; resize:none;" name="send_body") 
+              p FW From: !{fsender}
+              p On: !{fdate}
+              p Subject: !{fsubject}
+              pre !{fbody}
+          //-insert else if reply = true here
+          else
+            textarea#emailbody(style="width:50%; height:400px; overflow:auto; resize:none;" name="send_body")
+      tr
+        th(align="right" style="vertical-align:top; width:10%") Attachments:
+        td
+          //-not current functional feature
+          input(type="file" multiple)
+      tr
+        th(style="width:10%")
+        td
+          button(style="height: 30px;") Send Email
