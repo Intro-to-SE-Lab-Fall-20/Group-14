@@ -6,16 +6,25 @@ html
     if inbox && searchbar != false
       h2 Searchbar:
         form(action="landing/search" method="POST" name='searchbar')
-          input(type='text' name='search_query' placeholder="search your inbox")
+          input(type='text' name='search_query' placeholder="search your inbox" required="required")
           button Search
-    else
+    if inbox && searchbar != false
+      button(onclick="window.location.href='/compose';") Compose Email
     ul(style="list-style-type:none;")
       each val in emails
         li
           if inbox
             a(href="/landing/"+ val[0]) From:!{val[1]}: !{val[2]}
           else
-            h2 From: #{val[0]}
-            h2 Subject: !{val[1]}
-            p !{val[2]}
-            
+            form(action="/forward" method="POST" name="forward_form")
+              button(type="submit") Forward
+              h2 From: #{val[0]}
+              input(type="hidden" name="email_sender" value=val[0])
+              h2 Date: !{val[3]}
+              input(type="hidden" name="email_date" value=val[3])
+              h2 Subject: !{val[1]}
+              input(type="hidden" name="email_subject" value=val[1])
+              h2 Body:
+                h3
+                  pre !{val[2]}
+                  input(type="hidden" name="email_body" value=val[2])

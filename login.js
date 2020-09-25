@@ -22,6 +22,8 @@ const s3 = new AWS.S3({
   },
 });
 
+const SES = new AWS.SES({ apiVersion: "2010-12-01" });
+
 var connection = mysql.createConnection({
   host: config["sqlHost"],
   user: config["sqlUser"],
@@ -134,9 +136,10 @@ app.get("/landing", function (request, response) {
       function (error, results, fields) {
         for (const object in results) {
           email_array.push([
-            results[object]["id"],
+            results[object]["idemails"],
             results[object]["sender"],
             results[object]["subjects"],
+            results[object]["dates"],
           ]);
         }
         response.render("landing", {
@@ -157,7 +160,7 @@ app.get("/landing/:id", function (req, res) {
     console.log("requesting email id: " + req.params.id);
     var email_array = [];
     connection.query(
-      "SELECT * FROM emails where id = ? AND usernames = ?",
+      "SELECT * FROM emails where idemails = ? AND usernames = ?",
       [req.params.id, req.session.username],
       function (error, results, fields) {
         for (const object in results) {
@@ -165,6 +168,7 @@ app.get("/landing/:id", function (req, res) {
             results[object]["sender"],
             results[object]["subjects"],
             results[object]["body"],
+            results[object]["dates"],
           ]);
         }
         res.render("landing", {
@@ -176,7 +180,7 @@ app.get("/landing/:id", function (req, res) {
       }
     );
   } else {
-    response.send("Please login to view this page!");
+    res.send("Please login to view this page!");
   }
 });
 
@@ -196,9 +200,10 @@ app.post("/landing/search", function (req, res) {
       function (error, results, fields) {
         for (const object in results) {
           email_array.push([
-            results[object]["id"],
+            results[object]["idemails"],
             results[object]["sender"],
             results[object]["subjects"],
+            results[object]["dates"],
           ]);
         }
         res.render("landing", {
@@ -210,6 +215,70 @@ app.post("/landing/search", function (req, res) {
         console.log("Searched for " + req.body.search_query);
       }
     );
+  } else {
+    res.send("Please login to view this page!");
+  }
+});
+
+app.get("/compose", function (req, res) {
+  if (req.session.loggedin) {
+    res.render("compose", {
+      forward: false,
+    });
+  } else {
+    res.send("Please login to view this page!");
+  }
+});
+
+app.post("/forward", function (req, res) {
+  if (req.session.loggedin) {
+    var sender = req.body.email_sender;
+    var subject = req.body.email_subject;
+    var body = req.body.email_body;
+    var date = req.body.email_date;
+    //var email_from = req.body.email_from.substring(req.body.email_from.lastIndexOf("<")+1,req.body.email_from.lastIndexOf(">"))
+    res.render("compose", {
+      forward: true,
+      fsender: sender,
+      fsubject: subject,
+      fbody: body,
+      fdate: date,
+    });
+  } else {
+    res.send("Please login to view this page!");
+  }
+});
+
+app.post("/send", function (req, res) {
+  if (req.session.loggedin) {
+    var params = {
+      Destination: {
+        ToAddresses: [req.body.send_to],
+      },
+      Message: {
+        Body: {
+          Html: {
+            Charset: "UTF-8",
+            Data: req.body.send_body,
+          },
+        },
+        Subject: {
+          Charset: "UTF-8",
+          Data: req.body.send_subject,
+        },
+      },
+      Source: req.session.username + "@zetalogo.com",
+    };
+    var sendPromise = SES.sendEmail(params).promise();
+    sendPromise
+      .then(function (data) {
+        console.log(data.MessageId);
+      })
+      .catch(function (err) {
+        console.error(err, err.stack);
+      });
+    console.log("Email sent");
+    res.redirect("/landing");
   } else {
     res.send("Please login to view this page!");
   }
