@@ -1,0 +1,32 @@
+doctype html
+head
+  style
+    include style.css
+  title Login and Registration
+  //-link(rel='stylesheet',href='style.css',type='text/css')
+body
+  div(class='login-page')
+    p !{reminder}
+    div(class='form')
+      
+      if register
+        h1 Register
+        form(action='regi',method='POST',class='registration-form')
+          input(type='text',name='reg_username',placeholder='username',required='required')
+          input(type='password',name='reg_password',placeholder='password',required='required')
+          input(type='text',name='reg_firstname',placeholder='First Name',required='required')
+          input(type='text',name='reg_lastname',placeholder='Last Name',required='required')
+          label Birthday
+          input(type='date',name='reg_birthday',required='required')
+          button Register
+          p(class='message') Already registered?
+            a(href="login") Login
+      
+      if login
+        h1 Login
+        form(action='/auth',method='POST',class='login-form')
+          input(type='text',name='username',placeholder='username',required='required')
+          input(type='password',name='password',placeholder='password',required='required')
+          button Login
+          p(class='message') Not registered?
+            a(href='register') Register
