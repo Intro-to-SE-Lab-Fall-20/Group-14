@@ -7,10 +7,11 @@ head
     tinymce.init({
     selector: "#emailbody",
     });
+  script(src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js")
 title Composing an Email
 body
   h1 Compose an email below:
-  form(action="send" method="POST" class="email-form")
+  form(action="send" method="POST" class="email-form" enctype="multipart/form-data")
     table(style="width:100%; height:auto;")
       tr
         th(align="right" style="width:10%") To:
@@ -39,8 +40,21 @@ body
         th(align="right" style="vertical-align:top; width:10%") Attachments:
         td
           //-not current functional feature
-          input(type="file" multiple)
+          input(type="file" id="fileUpload" name="attach-file")
       tr
         th(style="width:10%")
         td
           button(style="height: 30px;") Send Email
+  script(type='text/javascript').
+    $('attach-file').ready(function() {
+    maxFileSize = 25 * 1024 * 1024;
+    $("#fileUpload").change(function() {
+    fileSize = this.files[0].size;
+    if (fileSize > maxFileSize) {
+    this.setCustomValidity("You can only upload files up to 25MB");
+    this.reportValidity();
+    } else {
+    this.setCustomValidity("");
+    }
+    });
+    });
