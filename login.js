@@ -1,16 +1,16 @@
-var mysql = require("mysql");
-var express = require("express");
-var session = require("express-session");
-var bodyParser = require("body-parser");
-var path = require("path");
-var AWS = require("aws-sdk");
+const mysql = require("mysql");
+const express = require("express");
+const session = require("express-session");
+const bodyParser = require("body-parser");
+const path = require("path");
+const AWS = require("aws-sdk");
 const simpleParser = require("mailparser").simpleParser;
+const multer = require("multer");
 const fs = require("fs");
 const config = JSON.parse(
   fs.readFileSync(path.join(__dirname, "/private/config.json"))
 );
-
-var app = express();
+const timeout = 1; //minutes before session times out
 
 AWS.config.update({ region: "us-east-1" });
 
@@ -22,7 +22,18 @@ const s3 = new AWS.S3({
   },
 });
 
-const SES = new AWS.SES({ apiVersion: "2010-12-01" });
+const SES = new AWS.SES({
+  apiVersion: "2010-12-01",
+  credentials: {
+    accessKeyId: config["S3access"],
+    secretAccessKey: config["S3secret"],
+  },
+});
+
+var MailComposer = require("nodemailer/lib/mail-composer");
+var storage = multer.memoryStorage();
+var upload = multer({ storage: storage });
+var app = express();
 
 var connection = mysql.createConnection({
   host: config["sqlHost"],
@@ -42,151 +53,176 @@ app.use(
   })
 );
 
-app.use(express.static(__dirname + "/public"));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 
-app.get("/", function (request, response) {
-  response.sendFile(path.join(__dirname + "/public/login.html"));
+app.get("/", function (req, res) {
+  res.render("reg-log", {
+    register: false,
+    login: true,
+    reminder: "",
+  });
 });
 
-app.post("/auth", function (request, response) {
-  var username = request.body.username;
-  var password = request.body.password;
-  if (username && password) {
-    connection.query(
-      "SELECT * FROM userinfo WHERE usernames = ? AND passwords = ?",
-      [username, password],
-      function (error, results, fields) {
-        if (results.length > 0) {
-          request.session.loggedin = true;
-          request.session.username = username;
-          response.redirect("/landing");
-        } else {
-          response.send("Incorrect Username and/or Password!");
-        }
+app.get("/register", function (req, res) {
+  res.render("reg-log", {
+    register: true,
+    login: false,
+    reminder: "",
+  });
+});
+
+app.get("/login", function (req, res) {
+  res.render("reg-log", {
+    register: false,
+    login: true,
+    reminder: "",
+  });
+});
+
+app.post("/auth", function (req, res) {
+  var username = req.body.username;
+  var password = req.body.password;
+  connection.query(
+    "SELECT * FROM userinfo WHERE usernames = ? AND passwords = ?",
+    [username, password],
+    function (err, results, fields) {
+      if (results.length > 0) {
+        req.session.loggedin = true;
+        req.session.username = username;
+        //req.session.cookie.maxAge = timeout * 60 * 1000;
+        res.redirect("landing");
+      } else {
+        res.render("reg-log", {
+          register: false,
+          login: true,
+          reminder: "Incorrect Username and/or Password!",
+        });
       }
-    );
-  } else {
-    response.send("Please enter a Username and Password!");
-  }
+    }
+  );
 });
 
-app.post("/regi", function (request, response) {
-  var reg_username = request.body.reg_username;
-  var reg_password = request.body.reg_password;
-  if (reg_username && reg_password) {
-    connection.query(
-      "SELECT * FROM userinfo WHERE usernames = ?",
-      [reg_username],
-      function (error, results, fields) {
-        if (error) throw error;
-        if (results.length == 0) {
-          connection.query(
-            "INSERT INTO userinfo (usernames, passwords, addresses) VALUES (?,?,?)",
-            [reg_username, reg_password, reg_username + "@zetalogo.com"],
-            function (error, results, fields) {
-              if (error) {
-                throw error;
-              } else {
-                console.log("Inserted Record");
-
-                //call to aws-sdk SES functions
-                rule_address(reg_username);
-
-                response.redirect("/");
-              }
-            }
-          );
-        } else {
-          response.send("Username already taken.");
-        }
+app.post("/regi", function (req, res) {
+  var reg_username = req.body.reg_username;
+  var reg_password = req.body.reg_password;
+  connection.query(
+    "SELECT * FROM userinfo WHERE usernames = ?",
+    [reg_username],
+    function (err, results, fields) {
+      if (err) throw err;
+      if (results.length == 0) {
+        connection.query(
+          "INSERT INTO userinfo (usernames, passwords, addresses) VALUES (?,?,?)",
+          [reg_username, reg_password, reg_username + "@zetalogo.com"],
+          function (err, results, fields) {
+            if (err) throw err;
+            console.log("Registered User");
+            rule_address(reg_username);
+            res.render("reg-log", {
+              register: false,
+              login: true,
+              reminder: "Registration Successful!",
+            });
+          }
+        );
+      } else {
+        res.render("reg-log", {
+          register: true,
+          login: false,
+          reminder: "Username already taken!",
+        });
       }
-    );
-  } else {
-    response.send("Please enter a Username and Password!");
-  }
+    }
+  );
 });
 
-app.get("/landing", function (request, response) {
-  //console.log("request was made: " + request.url);
-  if (request.session.loggedin) {
-    //response.sendFile(path.join(__dirname + "/public/landing.html"));
-    console.log(request.session.username);
-    //put the email insert code over here
-    const usn = request.session.username;
+app.get("/landing", async function (req, res) {
+  if (req.session.loggedin) {
+    const usn = req.session.username;
     const bucket = {
       Bucket: "zetalogo-mail",
       Prefix: usn + "/",
     };
-    s3.listObjectsV2(bucket, function (err, listObjectsV2result) {
-      if (err) {
-        console.log(err);
-        return;
-      }
-      listObjectsV2result.Contents.map((o, i) => {
-        grabObject(o.Key, usn);
-      });
-    });
-
+    const results = await s3.listObjectsV2(bucket).promise();
+    for (const item of results.Contents) {
+      grabObject(item.Key, usn);
+    }
     var email_array = [];
-    connection.query(
-      "SELECT * FROM emails WHERE usernames = ?",
-      [request.session.username],
-      function (error, results, fields) {
-        for (const object in results) {
-          email_array.push([
-            results[object]["idemails"],
-            results[object]["sender"],
-            results[object]["subjects"],
-            results[object]["dates"],
-          ]);
-        }
-        response.render("landing", {
-          emails: email_array,
-          inbox: true,
-          username: request.session.username,
-        });
-        //console.log(email_array);
-      }
-    );
+    const { result: inbox } = await query1`
+    SELECT * FROM emails WHERE usernames = ${req.session.username}`;
+    for (const object in inbox) {
+      email_array.push([
+        inbox[object]["idemails"],
+        inbox[object]["sender"],
+        inbox[object]["subjects"],
+        inbox[object]["dates"],
+      ]);
+    }
+    res.render("landing", {
+      emails: email_array,
+      inbox: true,
+      username: req.session.username,
+    });
   } else {
-    response.send("Please login to view this page!");
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
   }
 });
 
-app.get("/landing/:id", function (req, res) {
+app.get("/landing/:id", async function (req, res) {
   if (req.session.loggedin) {
-    console.log("requesting email id: " + req.params.id);
+    //placeholder
+    var has_att = false;
     var email_array = [];
-    connection.query(
-      "SELECT * FROM emails where idemails = ? AND usernames = ?",
-      [req.params.id, req.session.username],
-      function (error, results, fields) {
-        for (const object in results) {
-          email_array.push([
-            results[object]["sender"],
-            results[object]["subjects"],
-            results[object]["body"],
-            results[object]["dates"],
-          ]);
-        }
-        res.render("landing", {
-          emails: email_array,
-          inbox: false,
-          username: req.session.username,
-        });
-        //console.log(email_array);
+    var att_array = [];
+    const { result: single } = await query1`
+    SELECT * FROM emails WHERE idemails = ${req.params.id} AND usernames = ${req.session.username}`;
+    for (const object in single) {
+      email_array.push([
+        single[object]["sender"],
+        single[object]["subjects"],
+        single[object]["body"],
+        single[object]["dates"],
+      ]);
+    }
+    const { result: att } = await query1`
+    SELECT * FROM attachments WHERE idemails = ${req.params.id}`;
+    if (att.length !== 0) {
+      has_att = true;
+      for (const object in att) {
+        att_array.push([att[object]["idattachments"], att[object]["filename"]]);
       }
-    );
+      res.render("landing", {
+        emails: email_array,
+        inbox: false,
+        username: req.session.username,
+        has_atts: has_att,
+        atts: att_array,
+      });
+    } else {
+      res.render("landing", {
+        emails: email_array,
+        inbox: false,
+        username: req.session.username,
+        has_atts: has_att,
+      });
+    }
   } else {
-    res.send("Please login to view this page!");
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
   }
 });
 
 app.post("/landing/search", function (req, res) {
-  //res.send("You searched for: " + req.body.search_query);
   if (req.session.loggedin) {
+    //placeholder
     var email_array = [];
     connection.query(
       "SELECT * FROM emails WHERE usernames = ? AND (subjects LIKE ? OR sender LIKE ? OR body LIKE ? OR dates LIKE ?)",
@@ -216,27 +252,36 @@ app.post("/landing/search", function (req, res) {
       }
     );
   } else {
-    res.send("Please login to view this page!");
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
   }
 });
 
 app.get("/compose", function (req, res) {
   if (req.session.loggedin) {
+    //placeholder
     res.render("compose", {
       forward: false,
     });
   } else {
-    res.send("Please login to view this page!");
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
   }
 });
 
 app.post("/forward", function (req, res) {
   if (req.session.loggedin) {
+    //placeholder
     var sender = req.body.email_sender;
     var subject = req.body.email_subject;
     var body = req.body.email_body;
     var date = req.body.email_date;
-    //var email_from = req.body.email_from.substring(req.body.email_from.lastIndexOf("<")+1,req.body.email_from.lastIndexOf(">"))
     res.render("compose", {
       forward: true,
       fsender: sender,
@@ -245,42 +290,88 @@ app.post("/forward", function (req, res) {
       fdate: date,
     });
   } else {
-    res.send("Please login to view this page!");
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
   }
 });
 
-app.post("/send", function (req, res) {
+app.post("/send", upload.single("attach-file"), function (req, res) {
   if (req.session.loggedin) {
-    var params = {
-      Destination: {
-        ToAddresses: [req.body.send_to],
-      },
-      Message: {
-        Body: {
-          Html: {
-            Charset: "UTF-8",
-            Data: req.body.send_body,
+    //placeholder
+    if (typeof req.file !== "undefined") {
+      var mailOptions = {
+        from: req.session.username + "@zetalogo.com",
+        sender: req.session.username + "@zetalogo.com",
+        to: req.body.send_to,
+        subject: req.body.send_subject,
+        html: req.body.send_body,
+        attachments: [
+          {
+            filename: req.file.originalname,
+            content: req.file.buffer.toString("base64"),
+            encoding: "base64",
           },
+        ],
+      };
+    } else {
+      var mailOptions = {
+        from: req.session.username + "@zetalogo.com",
+        sender: req.session.username + "@zetalogo.com",
+        to: req.body.send_to,
+        subject: req.body.send_subject,
+        html: req.body.send_body,
+      };
+    }
+    var mail = new MailComposer(mailOptions);
+    mail.compile().build(function (err, message) {
+      var params = {
+        RawMessage: {
+          Data: message,
         },
-        Subject: {
-          Charset: "UTF-8",
-          Data: req.body.send_subject,
-        },
-      },
-      Source: req.session.username + "@zetalogo.com",
-    };
-    var sendPromise = SES.sendEmail(params).promise();
-    sendPromise
-      .then(function (data) {
-        console.log(data.MessageId);
-      })
-      .catch(function (err) {
-        console.error(err, err.stack);
+      };
+      SES.sendRawEmail(params, function (err, data) {
+        if (err) console.log("An error occured calling sendRawEmail");
+        else {
+          console.log("sendRawEmail succeeded");
+          res.redirect("/landing");
+        }
       });
-    console.log("Email sent");
-    res.redirect("/landing");
+    });
   } else {
-    res.send("Please login to view this page!");
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
+  }
+});
+
+app.get("attachments/:id", async function (req, res) {
+  if (req.session.loggedin) {
+    const { result: attres } = await query1`SELECT * FROM attachments 
+    WHERE idattachments = ${req.params.id} AND usernames = ${req.session.username}`;
+    var fileData = new Buffer.from(attres[0]["content"]);
+    res.writeHead(200, {
+      "Content-Type": attres[0]["contentType"],
+      "Content-Disposition":
+        attres[0]["contentDisposition"] +
+        "; filename=" +
+        encodeURI(attres[0]["filename"]),
+      "Content-Length": fileData.length,
+    });
+    res.write(fileData);
+    res.end();
+  } else {
+    //placeholder
+    res.redirect("/");
+    /* res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    }); */
   }
 });
 
@@ -289,8 +380,6 @@ function rule_address(usn) {
   var recipient = usn + "@zetalogo.com";
   var rule_name = usn + "-rule";
   var rule_params = {
-    //note that excluding the 'After' parameter
-    //will make the rule be added to the beginning
     Rule: {
       Actions: [
         {
@@ -308,9 +397,7 @@ function rule_address(usn) {
     },
     RuleSetName: "default-rule-set",
   };
-  var newRulePromise = new AWS.SES({ apiVersion: "2010-12-01" })
-    .createReceiptRule(rule_params)
-    .promise();
+  var newRulePromise = SES.createReceiptRule(rule_params).promise();
 
   newRulePromise
     .then(function (data) {
@@ -319,20 +406,6 @@ function rule_address(usn) {
     .catch(function (err) {
       console.error(err, err.stack);
     });
-  /* var verifyEmailPromise = new AWS.SES({ apiVersion: "2010-12-01" })
-    .sendCustomVerificationEmail({
-      EmailAddress: recipient,
-      TemplateName: "EmailVerification",
-    })
-    .promise();
-
-  verifyEmailPromise
-    .then(function (data) {
-      console.log("Email verification initiated");
-    })
-    .catch(function (err) {
-      console.error(err, err.stack);
-    }); */
 }
 
 async function grabObject(key, usn) {
@@ -342,25 +415,68 @@ async function grabObject(key, usn) {
   };
   console.log("Grabbing a single object:");
   const data = await s3.getObject(request).promise();
-  //await s3.deleteObject(request).promise();
-  //delete statement goes here: ? call await s3.deleteObject(request).promise()
   const email = await simpleParser(data.Body);
-  //console.log("attachments:" + email.attachments);
-  connection.query(
-    "INSERT INTO emails (usernames,dates,subjects,body,sender) VALUES (?,?,?,?,?)",
-    [usn, email.date, email.subject, email.text, email.from.text],
-    function (error, results, fields) {
+
+  await query1`
+    INSERT INTO emails (usernames,dates,subjects,body,sender)
+    VALUES (
+        ${usn},
+        ${email.date},
+        ${email.subject},
+        ${email.text},
+        ${email.from.text}
+    )`;
+  const { result: lastId } = await query1`SELECT LAST_INSERT_ID() AS id`;
+  const emailId = lastId[0].id;
+  console.log("Email ID last inserted is: " + emailId);
+  console.log("There are this many attachments: " + email.attachments.length);
+  console.log("First attachments is: " + email.attachments[0]["filename"]);
+  /* for (i = 0; i < email.attachments.length; i++) {
+    connection.query(
+      "INSERT INTO attachments (idemails,usernames,filename,content,contentType,contentDisposition) VALUES (?,?,?,?,?,?)",
+      [
+        emailId,
+        usn,
+        email.attachments[i]["filename"],
+        email.attachments[i]["content"],
+        email.attachments[i]["contentType"],
+        email.attachments[i]["contentDisposition"],
+      ]
+    );
+  } */
+  for (i = 0; i < email.attachments.length; i++) {
+    filename = email.attachments[i]["filename"];
+    content = email.attachments[i]["content"];
+    contentType = email.attachments[i]["contentType"];
+    contentDisposition = email.attachments[i]["contentDisposition"];
+    await query1`
+      INSERT INTO attachments (idemails,usernames,filename,content,contentType,contentDisposition)
+      VALUES (
+          ${emailId},
+          ${usn},
+          ${filename},
+          ${content},
+          ${contentType},
+          ${contentDisposition}
+      )`;
+  }
+  s3.deleteObject(request, function (err, data) {
+    if (err) console.log(err, err.stack);
+    console.log("Deleted an object");
+  });
+}
+
+function query1(queryParts, ...params) {
+  return new Promise((resolve, reject) => {
+    const sql = queryParts.join(" ? ");
+    connection.query(sql, params, (error, result, fields) => {
       if (error) {
-        throw error;
-      } else {
-        console.log("Inserted email into emails db");
-        s3.deleteObject(request, function (err, data) {
-          if (err) console.log(err, err.stack);
-          else console.log("Deleted an object");
-        });
+        reject(error);
+        return;
       }
-    }
-  );
+      resolve({ result, fields });
+    });
+  });
 }
 
 app.listen(3000);
