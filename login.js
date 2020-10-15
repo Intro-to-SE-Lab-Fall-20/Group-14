@@ -349,7 +349,7 @@ app.post("/send", upload.single("attach-file"), function (req, res) {
   }
 });
 
-app.get("attachments/:id", async function (req, res) {
+app.get("/attachments/:id", async function (req, res) {
   if (req.session.loggedin) {
     const { result: attres } = await query1`SELECT * FROM attachments 
     WHERE idattachments = ${req.params.id} AND usernames = ${req.session.username}`;
