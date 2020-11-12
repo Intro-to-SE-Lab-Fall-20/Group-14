@@ -1,4 +1,5 @@
 const mysql = require("mysql");
+const bcrypt = require("bcrypt");
 const express = require("express");
 const session = require("express-session");
 const bodyParser = require("body-parser");
@@ -10,7 +11,8 @@ const fs = require("fs");
 const config = JSON.parse(
   fs.readFileSync(path.join(__dirname, "/private/config.json"))
 );
-const timeout = 1; //minutes before session times out
+const timeout = 1; //minutes before session times out(not currently used)
+const lock_out_time = 2 * 60 * 1000;
 
 AWS.config.update({ region: "us-east-1" });
 
@@ -34,6 +36,8 @@ var MailComposer = require("nodemailer/lib/mail-composer");
 var storage = multer.memoryStorage();
 var upload = multer({ storage: storage });
 var app = express();
+var lock_me_out = Date.now();
+var attempts = 0;
 
 var connection = mysql.createConnection({
   host: config["sqlHost"],
@@ -55,6 +59,7 @@ app.use(
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+//app.use(bodyParser.text({ type: "text/html" }));
 
 app.get("/", function (req, res) {
   res.render("reg-log", {
@@ -73,52 +78,91 @@ app.get("/register", function (req, res) {
 });
 
 app.get("/login", function (req, res) {
-  res.render("reg-log", {
-    register: false,
-    login: true,
-    reminder: "",
-  });
+  res.redirect("/");
 });
 
-app.post("/auth", function (req, res) {
-  var username = req.body.username;
-  var password = req.body.password;
-  connection.query(
-    "SELECT * FROM userinfo WHERE usernames = ? AND passwords = ?",
-    [username, password],
-    function (err, results, fields) {
-      if (results.length > 0) {
+app.post("/auth", async function (req, res) {
+  if (Date.now() < lock_me_out) {
+    console.log("Locked out");
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder:
+        "Locked out for: " +
+        (lock_me_out - Date.now()) / (1 * 60 * 1000) +
+        " minutes",
+    });
+  } else {
+    console.log("Not locked out");
+
+    var username = req.body.username;
+    var password = req.body.password;
+
+    const { result: check_user } = await query1`
+  SELECT * FROM userinfo WHERE usernames = ${username}`;
+
+    if (check_user.length == 0) {
+      attempts += 1;
+      if (attempts == 3) {
+        attempts = 0;
+        lock_me_out = Date.now() + lock_out_time;
+      }
+      res.render("reg-log", {
+        register: false,
+        login: true,
+        reminder: "Incorrect Username and/or Password!",
+      });
+    } else {
+      const { result: check_password } = await query1`
+    SELECT * FROM userinfo WHERE usernames = ${username}`;
+
+      match_password = await bcrypt.compare(
+        password,
+        check_password[0]["passwords"]
+      );
+
+      if (match_password) {
         req.session.loggedin = true;
         req.session.username = username;
-        //req.session.cookie.maxAge = timeout * 60 * 1000;
-        res.redirect("landing");
+        attempts = 0;
+        res.redirect("apps");
       } else {
+        attempts += 1;
+        if (attempts == 3) {
+          attempts = 0;
+          lock_me_out = Date.now() + lock_out_time;
+        }
         res.render("reg-log", {
           register: false,
           login: true,
-          reminder: "Incorrect Username and/or Password!",
+          reminder: "Incorrect Username and/or Password!(bc)",
         });
       }
     }
-  );
+  }
 });
 
-app.post("/regi", function (req, res) {
+app.post("/regi", async function (req, res) {
   var reg_username = req.body.reg_username;
   var reg_password = req.body.reg_password;
   connection.query(
     "SELECT * FROM userinfo WHERE usernames = ?",
     [reg_username],
-    function (err, results, fields) {
+    async function (err, results, fields) {
       if (err) throw err;
       if (results.length == 0) {
+        const hashedPassword = await bcrypt.hash(reg_password, 10);
+
         connection.query(
           "INSERT INTO userinfo (usernames, passwords, addresses) VALUES (?,?,?)",
-          [reg_username, reg_password, reg_username + "@zetalogo.com"],
-          function (err, results, fields) {
+          [reg_username, hashedPassword, reg_username + "@zetalogo.com"],
+          async function (err, results, fields) {
             if (err) throw err;
             console.log("Registered User");
-            rule_address(reg_username);
+            //insert record for user's notes into notes table
+            await query1`
+            INSERT INTO usernotes (usernames) VALUES (${reg_username})`;
+            //rule_address(reg_username);
             res.render("reg-log", {
               register: false,
               login: true,
@@ -137,9 +181,165 @@ app.post("/regi", function (req, res) {
   );
 });
 
-app.get("/landing", async function (req, res) {
+app.get("/apps", function (req, res) {
   if (req.session.loggedin) {
-    const usn = req.session.username;
+    res.render("apps");
+  } else {
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
+  }
+});
+
+app.get("/notes", async function (req, res) {
+  if (req.session.loggedin) {
+    const { result: get_notes } = await query1`
+    SELECT * FROM usernotes WHERE usernames = ${req.session.username}`;
+    my_notes = get_notes[0]["notes"];
+    //console.log("my_notes: " + my_notes);
+    res.render("notes", {
+      notes: my_notes,
+    });
+  } else {
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
+  }
+});
+
+app.post("/save", async function (req, res) {
+  if (req.session.loggedin) {
+    var note_update = req.body.send_body;
+    //console.log("note_update is: " + note_update);
+    await query1`
+  UPDATE usernotes SET notes = ${note_update} WHERE usernames = ${req.session.username}`;
+
+    console.log("Notes saved");
+    res.redirect("/notes");
+  } else {
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
+  }
+});
+
+app.get("/passchange", function (req, res) {
+  if (req.session.loggedin) {
+    res.render("passchange", {
+      reminder: "",
+    });
+  } else {
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
+  }
+});
+
+app.post("/changepass", async function (req, res) {
+  if (req.session.loggedin) {
+    if (req.body.new_password == req.body.new_password_check) {
+      const hashedPassword = await bcrypt.hash(req.body.new_password, 10);
+
+      await query1`
+      UPDATE userinfo SET passwords = ${hashedPassword} WHERE usernames = ${req.session.username}`;
+      console.log("Password changed");
+      res.redirect("/apps");
+    } else {
+      res.render("passchange", {
+        reminder: "Your passwords did not match!",
+      });
+    }
+  } else {
+    res.render("reg-log", {
+      register: false,
+      login: true,
+      reminder: "Please log back in.",
+    });
+  }
+});
+
+//email reg stuff
+app.get("/myemail", function (req, res) {
+  res.render("reg-log-email", {
+    register: false,
+    login: true,
+    reminder: "",
+  });
+});
+
+app.get("/register-email", function (req, res) {
+  res.render("reg-log-email", {
+    register: true,
+    login: false,
+    reminder: "",
+  });
+});
+
+app.get("/login-email", function (req, res) {
+  res.render("reg-log-email", {
+    register: false,
+    login: true,
+    reminder: "",
+  });
+});
+
+app.post("/auth_email", async function (req, res) {
+  var username_email = req.body.username;
+  var password_email = req.body.password;
+
+  const { result: check_user_email } = await query1`
+  SELECT * FROM emailusers WHERE usernames = ${username_email} AND passwords = ${password_email}`;
+
+  if (check_user_email.length > 0) {
+    req.session.loggedinemail = true;
+    req.session.usernameemail = username_email;
+    res.redirect("/landing");
+  } else {
+    res.render("reg-log-email", {
+      register: false,
+      login: true,
+      reminder: "Incorrect Username and/or Password!",
+    });
+  }
+});
+
+app.post("/regi_email", async function (req, res) {
+  var reg_username_email = req.body.reg_username;
+  var reg_password_email = req.body.reg_password;
+  const { result: check_register_email } = await query1`
+  SELECT * FROM emailusers WHERE usernames = ${reg_username_email}`;
+  if (check_register_email.length == 0) {
+    var address_email = reg_username_email + "@zetalogo.com";
+    await query1`
+    INSERT INTO emailusers (usernames, passwords, addresses) VALUES (${reg_username_email},${reg_password_email},${address_email})`;
+    rule_address(reg_username_email);
+    res.render("reg-log-email", {
+      register: false,
+      login: true,
+      reminder: "Registration Successful!",
+    });
+  } else {
+    res.render("reg-log-email", {
+      register: true,
+      login: true,
+      reminder: "Username already taken!",
+    });
+  }
+});
+
+//end email reg stuff
+
+app.get("/landing", async function (req, res) {
+  if (req.session.loggedinemail) {
+    const usn = req.session.usernameemail;
     const bucket = {
       Bucket: "zetalogo-mail",
       Prefix: usn + "/",
@@ -150,7 +350,7 @@ app.get("/landing", async function (req, res) {
     }
     var email_array = [];
     const { result: inbox } = await query1`
-    SELECT * FROM emails WHERE usernames = ${req.session.username}`;
+    SELECT * FROM emails WHERE usernames = ${req.session.usernameemail}`;
     for (const object in inbox) {
       email_array.push([
         inbox[object]["idemails"],
@@ -162,10 +362,10 @@ app.get("/landing", async function (req, res) {
     res.render("landing", {
       emails: email_array,
       inbox: true,
-      username: req.session.username,
+      username: req.session.usernameemail,
     });
   } else {
-    res.render("reg-log", {
+    res.render("reg-log-email", {
       register: false,
       login: true,
       reminder: "Please log back in.",
@@ -174,13 +374,13 @@ app.get("/landing", async function (req, res) {
 });
 
 app.get("/landing/:id", async function (req, res) {
-  if (req.session.loggedin) {
+  if (req.session.loggedinemail) {
     //placeholder
     var has_att = false;
     var email_array = [];
     var att_array = [];
     const { result: single } = await query1`
-    SELECT * FROM emails WHERE idemails = ${req.params.id} AND usernames = ${req.session.username}`;
+    SELECT * FROM emails WHERE idemails = ${req.params.id} AND usernames = ${req.session.usernameemail}`;
     for (const object in single) {
       email_array.push([
         single[object]["sender"],
@@ -199,7 +399,7 @@ app.get("/landing/:id", async function (req, res) {
       res.render("landing", {
         emails: email_array,
         inbox: false,
-        username: req.session.username,
+        username: req.session.usernameemail,
         has_atts: has_att,
         atts: att_array,
       });
@@ -207,12 +407,12 @@ app.get("/landing/:id", async function (req, res) {
       res.render("landing", {
         emails: email_array,
         inbox: false,
-        username: req.session.username,
+        username: req.session.usernameemail,
         has_atts: has_att,
       });
     }
   } else {
-    res.render("reg-log", {
+    res.render("reg-log-email", {
       register: false,
       login: true,
       reminder: "Please log back in.",
@@ -221,7 +421,7 @@ app.get("/landing/:id", async function (req, res) {
 });
 
 app.post("/landing/search", function (req, res) {
-  if (req.session.loggedin) {
+  if (req.session.loggedinemail) {
     //placeholder
     var email_array = [];
     connection.query(
@@ -246,13 +446,13 @@ app.post("/landing/search", function (req, res) {
           emails: email_array,
           inbox: true,
           searchbar: false,
-          username: req.session.username,
+          username: req.session.usernameemail,
         });
         console.log("Searched for " + req.body.search_query);
       }
     );
   } else {
-    res.render("reg-log", {
+    res.render("reg-log-email", {
       register: false,
       login: true,
       reminder: "Please log back in.",
@@ -261,13 +461,13 @@ app.post("/landing/search", function (req, res) {
 });
 
 app.get("/compose", function (req, res) {
-  if (req.session.loggedin) {
+  if (req.session.loggedinemail) {
     //placeholder
     res.render("compose", {
       forward: false,
     });
   } else {
-    res.render("reg-log", {
+    res.render("reg-log-email", {
       register: false,
       login: true,
       reminder: "Please log back in.",
@@ -276,7 +476,7 @@ app.get("/compose", function (req, res) {
 });
 
 app.post("/forward", function (req, res) {
-  if (req.session.loggedin) {
+  if (req.session.loggedinemail) {
     //placeholder
     var sender = req.body.email_sender;
     var subject = req.body.email_subject;
@@ -290,7 +490,7 @@ app.post("/forward", function (req, res) {
       fdate: date,
     });
   } else {
-    res.render("reg-log", {
+    res.render("reg-log-email", {
       register: false,
       login: true,
       reminder: "Please log back in.",
@@ -299,12 +499,12 @@ app.post("/forward", function (req, res) {
 });
 
 app.post("/send", upload.single("attach-file"), function (req, res) {
-  if (req.session.loggedin) {
+  if (req.session.loggedinemail) {
     //placeholder
     if (typeof req.file !== "undefined") {
       var mailOptions = {
-        from: req.session.username + "@zetalogo.com",
-        sender: req.session.username + "@zetalogo.com",
+        from: req.session.usernameemail + "@zetalogo.com",
+        sender: req.session.usernameemail + "@zetalogo.com",
         to: req.body.send_to,
         subject: req.body.send_subject,
         html: req.body.send_body,
@@ -318,8 +518,8 @@ app.post("/send", upload.single("attach-file"), function (req, res) {
       };
     } else {
       var mailOptions = {
-        from: req.session.username + "@zetalogo.com",
-        sender: req.session.username + "@zetalogo.com",
+        from: req.session.usernameemail + "@zetalogo.com",
+        sender: req.session.usernameemail + "@zetalogo.com",
         to: req.body.send_to,
         subject: req.body.send_subject,
         html: req.body.send_body,
@@ -341,7 +541,7 @@ app.post("/send", upload.single("attach-file"), function (req, res) {
       });
     });
   } else {
-    res.render("reg-log", {
+    res.render("reg-log-email", {
       register: false,
       login: true,
       reminder: "Please log back in.",
@@ -350,9 +550,9 @@ app.post("/send", upload.single("attach-file"), function (req, res) {
 });
 
 app.get("/attachments/:id", async function (req, res) {
-  if (req.session.loggedin) {
+  if (req.session.loggedinemail) {
     const { result: attres } = await query1`SELECT * FROM attachments 
-    WHERE idattachments = ${req.params.id} AND usernames = ${req.session.username}`;
+    WHERE idattachments = ${req.params.id} AND usernames = ${req.session.usernameemail}`;
     var fileData = new Buffer.from(attres[0]["content"]);
     res.writeHead(200, {
       "Content-Type": attres[0]["contentType"],
@@ -428,9 +628,9 @@ async function grabObject(key, usn) {
     )`;
   const { result: lastId } = await query1`SELECT LAST_INSERT_ID() AS id`;
   const emailId = lastId[0].id;
-  console.log("Email ID last inserted is: " + emailId);
-  console.log("There are this many attachments: " + email.attachments.length);
-  console.log("First attachments is: " + email.attachments[0]["filename"]);
+  //console.log("Email ID last inserted is: " + emailId);
+  //console.log("There are this many attachments: " + email.attachments.length);
+  //console.log("First attachments is: " + email.attachments[0]["filename"]);
   /* for (i = 0; i < email.attachments.length; i++) {
     connection.query(
       "INSERT INTO attachments (idemails,usernames,filename,content,contentType,contentDisposition) VALUES (?,?,?,?,?,?)",
