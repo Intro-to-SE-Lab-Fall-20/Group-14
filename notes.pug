@@ -1,0 +1,29 @@
+doctype html
+head
+  meta(charset="utf-8")
+  meta(name="viewport" content="width=devide-width, initial-scale=1")
+  script(src='https://cdn.tiny.cloud/1/no-api-key/tinymce/5/tinymce.min.js', referrerpolicy='origin')
+  script.
+    tinymce.init({
+    selector: "#notebody",
+    });
+  script(src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js")
+title My Notes
+body
+  h1 
+    a(href="apps") Back to My Apps
+  h1 Notes:
+  form(action="save" method="POST" class="email-form")
+    table(style="width:100%; height:auto;")
+      tr
+        th(align="right" style="width:10%") (Remember to save!):
+        td(style="width:80%")
+      tr
+        th(style="width:10%")
+        td
+          textarea#notebody(style="width:50%; height:400px; overflow:auto; resize:none;" name="send_body") 
+            p !{notes}
+      tr
+        th(style="width:10%")
+        td
+          button(style="height: 30px;") Save Notes
