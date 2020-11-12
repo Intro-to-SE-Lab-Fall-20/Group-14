@@ -7,6 +7,9 @@ html
         p Home
       a(href="#" style="float:left;color:#f2f2f2;text-align:center;padding:14px 16px;text-decoration:none") 
         p Logout
+    if inbox && searchbar != false
+      h1
+        a(href="apps") Back to My Apps
     h1 !{username}'s inbox:
     if inbox && searchbar != false
       h2 Searchbar:
@@ -38,4 +41,3 @@ html
               each val in atts
                 p
                   a(href="/attachments/" + val[0]) !{val[1]}
-            
