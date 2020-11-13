@@ -10,5 +10,3 @@ before install:
 - npm i -g npm@latest
 install:
 - npm install
-script:
-- npm test
