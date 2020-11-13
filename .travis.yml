@@ -11,4 +11,4 @@ before install:
 install:
 - npm install
 scripts:
-- npm run devStart
+- npm test
