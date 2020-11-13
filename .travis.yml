@@ -2,9 +2,13 @@ language: node_js
 node_js:
 - 14
 
-before install:
-- npm i -g npm@latest
-
 cache:
   directories:
     - "node_modules"
+
+before install:
+- npm i -g npm@latest
+install:
+- npm install
+script:
+- npm test
