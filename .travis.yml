@@ -10,3 +10,5 @@ before install:
 - npm i -g npm@latest
 install:
 - npm install
+scripts:
+- npm run devStart
